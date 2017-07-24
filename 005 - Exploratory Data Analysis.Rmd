@@ -1,0 +1,979 @@
+---
+title: "005 - Exploratory Data Analysis"
+author: "YJ Thay"
+date: "10 September 2016"
+output: html_document
+---
+
+# A stream-of-consciousness analysis and exploration of the data.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Packages}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 10, dpi=200)
+#install.packages("ggplot2", dependencies = T) 
+#install.packages("knitr", dependencies = T)
+#install.packages("dplyr", dependencies = T)
+library(dplyr)
+library(GGally)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(scales)
+```
+
+Load the data set into R
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_the_Data}
+setwd('C:/Users/YJ/Documents/1) Learning/Udacity - Data Analyst/Submissions/005')
+loan <- read.csv('prosperLoanData.csv')
+#setwd('C:/Users/thayyee/Desktop/')
+#loan_sample <- read.csv('loan_sample.csv')
+```
+
+Sample a 10,000 observations and look through the summary and data types of them
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Sampling}
+set.seed(1019183)
+loan_sample <- loan[sample(nrow(loan), 10000, replace = FALSE),]
+str(loan_sample)
+summary(loan_sample)
+
+allvariables <- c('CreditGrade', 
+                  'ClosedDate',
+                  'LP_NetPrincipalLoss', 
+                  'DebtToIncomeRatio', 
+                  'IncomeRange', 
+                  'IncomeVerifiable', 
+                  'LoanCurrentDaysDelinquent', 
+                  'LoanOriginalAmount', 
+                  'Investors', 
+                  'BorrowerAPR', 
+                  'LenderYield', 
+                  'BorrowerState',
+                  'IsBorrowerHomeowner', 
+                  'OpenCreditLines',
+                  'AmountDelinquent',
+                  'BankcardUtilization', 
+                  'AvailableBankcardCredit',
+                  'LoanOriginationQuarter',
+                  'RevolvingCreditBalance')
+
+loan_sample <- loan_sample[, allvariables]
+```
+
+We will look at doing some simple data cleaning so as to facilitate the examination of the data.
+
+Looking at the data, we note that ClosedDate is a factor and we will convert it into a date before splitting it into year, month and day.
+
+First we convert the date into standard date time format then we use the separate function to create new variables based off the ClosedDate
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+loan_sample$ClosedDate<-strptime(loan_sample$ClosedDate, "%Y-%m-%d %H:%M:%S")
+loan_sample$ClosedDate<-as.Date(loan_sample$ClosedDate)
+loan_sample<-separate(loan_sample,ClosedDate,c('ClosedYear','ClosedMonth', 
+                                               'ClosedDay'),sep='-')
+loan_sample$ClosedYear<-as.integer(loan_sample$ClosedYear)
+loan_sample$ClosedMonth<-as.integer(loan_sample$ClosedMonth)
+loan_sample$ClosedDay<-as.integer(loan_sample$ClosedDay)
+
+allvariables<-names(loan_sample)
+```
+
+Next we look to arrange the IncomeRange and LoanOriginationQuarter factors in a more intuitive order
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+loan_sample$IncomeRange<-factor(loan_sample$IncomeRange,c("Not displayed", 
+                                                          "Not employed", 
+                                                          "$0", 
+                                                          "$1-24,999", 
+                                                          "$25,000-49,999", 
+                                                          "$50,000-74,999", 
+                                                          "$75,000-99,999", 
+                                                          "$100,000+"))
+
+quarter <-vector("list",length(levels(loan_sample$LoanOriginationQuarter)))
+k=1
+for (i in c(2006,2007,2008,2009,2010,2011,2012,2013))
+{
+  for(j in c("Q1","Q2","Q3","Q4"))
+  {
+    quarter [[k]]<-paste(j, i,sep=" ")
+    k <- k+1
+  }
+}
+
+loan_sample$LoanOriginationQuarter <- 
+  factor(loan_sample$LoanOriginationQuarter, quarter)
+
+```
+
+## Univariate
+
+Looking at the distribution of Credit Grade of borrowers, we noticed that there seems to be a significant amount of borrowers who are not credit graded, stripping those borrowers away, we can see that most of the borrowers with Credit Grade are in C or D
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+p1 <- ggplot(aes(x=CreditGrade), 
+             data=loan_sample) + 
+  geom_bar(aes(fill=CreditGrade)) +
+  guides(fill=FALSE)
+
+p2 <- ggplot(aes(x=CreditGrade), 
+             data=subset(loan_sample, 
+                         !(loan_sample$CreditGrade==""))) + 
+  geom_bar(aes(fill=CreditGrade)) +
+  guides(fill=FALSE)
+
+grid.arrange(p1,p2,nrow=2)
+```
+
+It becomes clear why CreditGrade has significiant amount of blanks from the following graph.  It seems like after Q4 2008, all the borrowers are no longer credit graded.  This is verified via the second plot.  Thus, there seems to be a structural change in the lending model post Q4 2008. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+condition<-!(is.na(loan_sample$LoanOriginationQuarter))
+ggplot(aes(x=LoanOriginationQuarter), 
+           data=subset(loan_sample,condition)) +
+  geom_bar(aes(fill=(CreditGrade==""))) +
+  ggtitle('Pre vs Post 2008') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  scale_fill_discrete(name = 'Is data from \n post-2008?')
+```
+
+Given that there is a structural change in the lending model as applicants post Q4 2008 are no longer Credit Graded by the same measure, can explore and see if the model used to evaluate borrowers pre Q4 2008 and post Q4 2008 are significantly different and which is better.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+quarter <-vector("list",12)
+k=1
+for (i in c(2006,2007,2008))
+{
+  for(j in c("Q1","Q2","Q3","Q4"))
+  {
+    quarter [[k]]<-paste(j, i,sep=" ")
+    k <- k+1
+  }
+}
+loan_sample_pre <- subset(loan_sample, 
+         loan_sample$LoanOriginationQuarter %in% quarter)
+loan_sample_post <- 
+  subset(loan_sample, 
+         !(loan_sample$LoanOriginationQuarter %in% quarter) & 
+           !is.na(loan_sample$LoanOriginationQuarter))
+```
+
+We will include a new binary variable in the data set so as to show if the data is pre-2008 and post-2008 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+loan_sample <- loan_sample %>%
+  mutate(Pre2008Indicator = 
+           ifelse(LoanOriginationQuarter %in% quarter, TRUE, FALSE))
+```
+
+Credit quality can also be measured using percentage delinquency of original loan amount.
+
+Removing all the individuals that have no delinquent amounts, we note that most of the delinquencies are less than 25% of the original loan amount.  In fact, after that, the number of people drop off significantly.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=AmountDelinquent/LoanOriginalAmount), 
+       data = subset(loan_sample, 
+                     (loan_sample$AmountDelinquent / 
+                        loan_sample$LoanOriginalAmount)>0)) +
+  geom_histogram(binwidth = 0.1) +
+  scale_x_continuous(breaks = seq(0,2,0.1)) +
+  coord_cartesian(xlim=c(0,2))
+```
+
+A simple function to create bar plots with a given variable and data set.
+
+```{r}
+create_bar <- function(dataset, 
+                       variable1, 
+                       xbreaks=1,
+                       ylower=1,
+                       yupper=1, 
+                       standardplot){
+  if (standardplot) {
+    return(ggplot(aes_string(x = variable1), 
+                  data = dataset) + 
+             geom_bar() +
+             theme(axis.text.x = element_text(angle=90)))
+  } else {
+  minx <- round(min(dataset[,variable1],na.rm=TRUE), digits = 1)
+  maxx <- round(max(dataset[,variable1],na.rm=TRUE), digits = 2)
+  return(ggplot(aes_string(x = variable1), 
+                data = dataset) + 
+           geom_bar() + 
+           scale_x_continuous(breaks=seq(0,maxx,xbreaks)) +
+           coord_cartesian(ylim=c(ylower,yupper)))
+  }
+}
+
+```
+
+The year 2013 seems to be the peak year of borrowing with a sharp fall in 2014
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample,'ClosedYear',1,0,1500,FALSE)
+```
+
+We see higher loan closures in Feburary with a second spike in September.  There tends to be an increase in loan closures towards the end of the quarter
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'ClosedMonth',1,0,500,FALSE)
+```
+
+22nd seems to be the most popular day for closure of loans.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'ClosedDay',1,0,225,FALSE)
+```
+
+Most borrowers are in the income range $25,000-49,999 and $50,000-74,999.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'IncomeRange',1,0,1,TRUE)
+```
+
+Majority of the incomes are verifiable
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'IncomeVerifiable',1,0,1,TRUE)
+```
+
+Majority of loans have no more than 300 investors. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'Investors',100,0,100,FALSE)
+```
+
+BorrowerAPR generally starts concentrate between 10% to 30% with a dual peak at 15% and 23% regions.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'BorrowerAPR',0.05,0,30,FALSE)
+```
+
+Similarly, LenderYield generally starts concentrate between 5% to 30% with a dual peak at 15%, 23% and 30% regions.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'LenderYield',0.05,0,100,FALSE)
+```
+
+California has the highest number of loan applicants followed by Florida and Texas.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'BorrowerState',0.1,0,1,TRUE)
+```
+
+Half of the sample borrowers are homeowners.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'IsBorrowerHomeowner',0.1,0,1,TRUE)
+```
+
+On average, borrowers have about 8 open credit lines.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'OpenCreditLines',0.1,0,1,TRUE)
+```
+
+Bank Card Utilization is very high and count increases with Bank card utilisation.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'BankcardUtilization',0.25,0,200,FALSE)
+```
+
+Highest borrower counts in Q4 2013 followed by Q1 2014 and Q3 2013.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+create_bar(loan_sample, 'LoanOriginationQuarter',0.25,0,200,TRUE)
+```
+
+Looking at the distribution of investors over both pre-2008 and post-2008, we noticed that they look rather similar.
+
+For ease of comparison, I have scaled both sample sets using the same axis where we see only counts up to a 100 and a max of 800 investors.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+p1<-ggplot(aes(x=Investors), 
+       data=loan_sample_pre) +
+  geom_bar() + 
+  scale_y_continuous(limits=c(0,100)) + 
+  scale_x_continuous(limits=c(0,800)) +
+  ggtitle('Pre-2008')
+p2<-ggplot(aes(x=Investors), 
+       data=loan_sample_post) +
+  geom_bar() + 
+  scale_y_continuous(limits=c(0,100)) + 
+  scale_x_continuous(limits=c(0,800)) +
+  ggtitle('Post-2008')
+grid.arrange(p1,p2,nrow=1)
+```
+
+### Main Takeaways
+1) There is a structural change in credit lending standards in end of 2008.
+2) Most delinquencies are less than 25% of original amount.
+3) Most of the borrowers with Credit Grade are in C or D pre-2008
+4) Most borrowers are in the income range $25,000-74,999.
+5) Investors count distribution looks generally the same (both pre-2008 and post-2008)
+6) Average borrower has 8 credit lines.
+
+
+## Bivariate
+
+Giving ourselves a general overview of the data to see if there are interesting relationships that we can explore in the data set, we will use ggpairs to plot out all the various relationships between variables.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+#ggpairs(loan_sample, stat='count')
+```
+
+As expected, we see strong correlation between what is the rate charged to the borrower and what is earned by the lender (after taking into account losses) and the picture is very much the same across the different states.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=LenderYield,y=BorrowerAPR), 
+       data=loan_sample) + 
+  geom_point(alpha=1/15, aes(color=BorrowerState)) + 
+  facet_wrap(~BorrowerState) +
+  guides(color=FALSE) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This is further confirmed but the correlation plot of LenderYield vs BorrowerAPR across each state
+
+```{r}
+
+A1 <- loan_sample %>% 
+  group_by(BorrowerState) %>% 
+  mutate(COR = cor(LenderYield, BorrowerAPR))
+
+ggplot(A1, aes( x=BorrowerState, y=COR ) ) + 
+               geom_point(stat = "identity" ) +
+          theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Plotting the number of applications at each ClosingDay and breaking it down to each month, we notice something very interesting.  The ClosedDay seems to spike at the start of the week and tend to taper off towards the end of week.  Also, there tend to be spikes towards the end of the month.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=ClosedDay) , 
+       data = subset(loan_sample, !is.na(loan_sample$ClosedDay))) + 
+  geom_bar() + 
+  scale_x_continuous(breaks=seq(0,31,7)) +
+  facet_wrap(~ClosedMonth, nrow=4, ncol=3)
+```
+
+Something interesting occured when we plot the bar graph of income range but facet on Credit Grade (excluding the post-2008 samples).  The general distribution of income for different CreditGrade looks very similar with the peak coming at about $25,000-50,000 income range.
+
+Furthermore, 
+
+1) Income range seems to have minimal impact on the CreditGrade of an individual.  This is because there is an absence of skew across the different CreditGrade
+
+2) There is a observably lower number of borrowers in the "$1-24,999" category as compared to the "$50,000-74,999" category which is slightly counterintuitive considering the trend from $25,000 to $100,000+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=IncomeRange), data=loan_sample_pre) + 
+  geom_bar(aes(fill=CreditGrade)) + 
+  facet_wrap(~CreditGrade, ncol=2) + 
+  guides(fill = FALSE) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+However, putting it beside that of post-2008, there seems to be obvious differences in the income profile of the borrowers.
+
+1) There seems to be better data collection with income with individuals reporting as "Not displayed" altogether disappearing
+
+2) More importantly, there is a slightly change in the income profile of the borrowers with higher income applicants utilising the credit facility more post 2008.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+
+ggplot(aes(x=IncomeRange), 
+            data=subset(loan_sample,
+                        !loan_sample$IncomeRange=='Not displayed' & 
+                          !loan_sample$IncomeRange=='Not employed')) + 
+  geom_bar(aes(fill=Pre2008Indicator),position='dodge') + 
+  scale_y_continuous(labels = comma) +
+  ggtitle('Income Range Pre-2008 vs Post-2008') +
+  theme(axis.text.x=element_text(angle = 45, hjust = 1)) 
+
+```
+
+To confirm that the income we are using is reliable, we will take a look and make sure majority of the income is verified 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=IncomeRange), 
+       data=loan_sample) + 
+  geom_bar(aes(fill=IncomeVerifiable)) +
+  theme(legend.position='top') +
+  coord_flip()
+```
+
+We will look to remove the subset of incomes that cannot be verified
+
+```{r}
+loan_sample_pre1<-subset(loan_sample_pre, 
+                         loan_sample_pre$IncomeVerifiable=='True')
+loan_sample_post1<-subset(loan_sample_post, 
+                          loan_sample_post$IncomeVerifiable=='True')
+```
+
+Percentage of deliquent amount varies with income range and from the next plot, we do note that the 
+shape of the histograms are rather similar.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=AmountDelinquent/LoanOriginalAmount), 
+       data = subset(loan_sample, 
+                     (loan_sample$AmountDelinquent / 
+                        loan_sample$LoanOriginalAmount)>0)) +
+  geom_histogram(binwidth = 0.1, 
+                 aes(fill=IncomeRange)) +
+  scale_x_continuous(breaks = seq(0,2,0.5)) +
+  coord_cartesian(xlim=c(0,2)) +
+  facet_wrap(~IncomeRange,ncol=2) +
+  guides(fill=FALSE)
+```
+
+We assume that BorrowerAPR and number of investors are independently determined.  BorrowerAPR is determined strictly by the lending company and number of investors who are given a second look and decide what and where is the best to invest their funds independent of the BorrowerAPR the lending company charges (I.e. even if lending company charges a super low APR, if the borrower is considered risky by the investors, there will be very few investors)
+
+From the scatter plot below, we note there seems to be a general trend in where more risky borrowers (as measured by their BorrowerAPR) gets less investors.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=BorrowerAPR, 
+           y=Investors), 
+       data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/10) +
+  geom_smooth(method='lm',se=FALSE)
+```
+
+The income group of $25,000 to $74,999 are the main reasons why the average borrower have about 8 open credit lines whilst higher income individuals have slightly more open credit lines and lower income individuals have less. 
+
+There seems to be a relationship between number of open credit lines and income range.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(y=OpenCreditLines, 
+           x=IncomeRange), 
+       data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/20) 
+```
+
+### Main Takeaways:
+1) Most income are verified.  
+  a) There is better data collection post 2008 where there are much less Not displayed income.
+2) Borrowers have a slightly different income profile n pre-2008 and post-2008.
+  a) Pre-2008 most borrowers are in the "$25,000-49,999" or Not displayed income range.
+  b) Post-2008 most borrowers are in the "$50,000-74,999" income range
+3) More risky borrowers (as measured by their BorrowerAPR) gets less investors.
+4) Shape of the histograms of percentage of delinquent amount looks similar across different income groups.
+5) Income seems to have minimal impact on the CreditGrade of an individual.  
+6) The ClosedDay seems to spike at the start of the week and tend to taper off towards the end of week.  
+  a) Closures also tend to spike towards the end of the month.
+7) There is a strong correlation between BorrowerAPR and LenderYield.
+  a) The picture is the same across all the different states
+8) The higher the income of an individual, the more likely there will be more open credit lines.
+
+## Multivariate Plots
+
+There is generally more Open Credit lines for individuals post 2008 bar the top income group.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+pre<- ggplot(aes(x=IncomeRange, 
+                 y=OpenCreditLines), 
+             data = subset(loan_sample_pre, 
+                           !loan_sample_pre$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre$IncomeRange=='Not employed'))+
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(breaks = seq(0,50,5)) +
+  coord_cartesian(ylim=c(0,35)) +
+  ggtitle('Pre-2008 Current Credit Lines') + 
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+post<- ggplot(aes(x=IncomeRange, 
+                  y=OpenCreditLines), 
+              data = subset(loan_sample_post, 
+                            !loan_sample_post$IncomeRange=='Not employed'))+
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(breaks = seq(0,50,5)) +
+  coord_cartesian(ylim=c(0,35)) +
+  ggtitle('Post-2008 Current Credit Lines') + 
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+by(loan_sample_pre$OpenCreditLines, loan_sample_pre$IncomeRange,summary) 
+by(loan_sample_post$OpenCreditLines, loan_sample_post$IncomeRange,summary) 
+
+grid.arrange(pre, post, nrow=1)
+```
+
+Another way to look at the same data, thorugh boxplots of displaced data so as to be able to see the outliers better
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+
+ggplot(aes(x=IncomeRange, OpenCreditLines), 
+            data=subset(loan_sample,
+                        !loan_sample$IncomeRange=='Not displayed' & 
+                          !loan_sample$IncomeRange=='Not employed')) + 
+  geom_boxplot(aes(fill=Pre2008Indicator)) + 
+  scale_y_continuous(labels = comma) +
+  ggtitle('Open Credit Lines across IncomeRange Pre-2008 vs Post-2008') +
+  theme(axis.text.x=element_text(angle = 45, hjust = 1)) 
+
+```
+
+To understand this phenomenon of higher income individuals applying for the loan facility much more frequently, we look the following 2 boxplots.  The amount of credit in the accounts are actually LOWER for the top 2 income groups post-2008 but on the contrary, it seems to be higher in the next 2 income groups ($25,000-49,999 and $50,000-74,999)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+pre<- ggplot(aes(x=IncomeRange, 
+                 y=AvailableBankcardCredit), 
+             data = subset(loan_sample_pre1, 
+                           !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma) +
+  coord_cartesian(ylim = c(0,50000)) +
+  ggtitle('Pre-2008 AvailableBankcardCredit') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+post<- ggplot(aes(x=IncomeRange, 
+                  y=AvailableBankcardCredit), 
+              data = subset(loan_sample_post1, 
+                            !loan_sample_post1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma) +
+  coord_cartesian(ylim = c(0,50000)) +
+  ggtitle('Post-2008 AvailableBankcardCredit') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+grid.arrange(pre, post, nrow=1)
+```
+
+Though there are more open credit lines and applications for higher income individuals, the amount of credit available for them seem to have decreased
+
+We have established that the average amount of credit available to the top 2 income ranges has decreased whilst that of the next 2 income range has increased.  Looking at the amount of utilization, it seems like the amount of utilisation has not changed much for the top  income brackets but has decreased for that of the next 3 income groups.  
+An altruistic individual might claim that borrowers in the lower income ranges has become more "discipline" in their utilisation of the loan facility post 2008 given the reduction in the utilisation of Bank card and supplemented by the fact that lenders have increased the amount of credit available to them.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+pre<- ggplot(aes(x=IncomeRange, 
+                 y=BankcardUtilization), 
+             data = subset(loan_sample_pre1, 
+                           !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma, 
+                     breaks=seq(0,1,0.1)) +
+  coord_cartesian(ylim= c(0,1)) +
+  ggtitle('Pre-2008 BankcardUtilization') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+
+post<- ggplot(aes(x=IncomeRange,y=BankcardUtilization), 
+              data = subset(loan_sample_post1, 
+                            !loan_sample_post1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma, 
+                      breaks=seq(0,1,0.1)) +
+  coord_cartesian(ylim = c(0,1)) +
+  ggtitle('Post-2008 BankcardUtilization')  +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+
+grid.arrange(pre, post, nrow=1) 
+```
+
+To see if the statement above is true, we measure how discipline one is with his finances by his debt to income ratio and interestingly, it does not seem like thats the case.  The mean DebtToIncomeRatio for almost all income groups have risen post 2008.
+
+In fact, it seems like indivduals in the lower income ranges has become "less discipline".
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+pre<- ggplot(aes(x=IncomeRange, 
+                 y=DebtToIncomeRatio), 
+             data = subset(loan_sample_pre1, 
+                           !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre1$IncomeRange=='Not employed'))+
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma, 
+                     breaks=seq(0,1,0.1)) +
+  coord_cartesian(ylim = c(0,1)) +
+  ggtitle('Pre-2008 DebtToIncomeRatio') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+
+post<- ggplot(aes(x=IncomeRange, 
+                  y=DebtToIncomeRatio), 
+              data = subset(loan_sample_post1, 
+                            !loan_sample_post1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  scale_y_continuous(labels = comma, 
+                     breaks = seq(0, 1, 0.1)) +
+  coord_cartesian(ylim = c(0, 1)) +
+  ggtitle('Post-2008 DebtToIncomeRatio') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+
+by(loan_sample_pre1$DebtToIncomeRatio, 
+   loan_sample_pre1$IncomeRange, 
+   summary)
+by(loan_sample_post1$DebtToIncomeRatio,
+   loan_sample_post1$IncomeRange,
+   summary)
+
+grid.arrange(pre, post, nrow=1)
+```
+
+The following scatter plot show that homeowners tend to have more  revolving credit balance on their account on average and also tend to be of higher income.
+
+This is confirmed by the boxplot next to it
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+p1 <- ggplot(aes(x=IsBorrowerHomeowner, 
+           y=RevolvingCreditBalance), 
+       data=loan_sample) +
+  geom_point(position = position_jitter(), 
+             aes(color=IncomeRange), 
+             alpha=1/5) +
+  coord_cartesian(ylim = c(0,250000)) +
+  scale_colour_brewer(palette = 'RdBu')
+
+p2 <- ggplot(aes(x=IncomeRange, 
+           y=RevolvingCreditBalance), 
+       data=loan_sample) +
+  geom_boxplot(aes(fill=IsBorrowerHomeowner)) +
+  scale_y_log10() +
+  theme(axis.text.x=element_text(angle=90))
+
+grid.arrange(p1,p2,nrow=1)
+```
+
+A question that came to mind is that do homeowners tend to have more days delinquent given that they tend have higher revolving credit balances.  From the plot below, it seems homeowners do seem more "responsible" and capable to service their debt with a lower average days of delinquency although the difference is surprisingly small (about a month)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+homeownerMeanDeliq <- as.numeric(format(mean(subset(loan_sample, 
+                                                    IsBorrowerHomeowner=='True')$LoanCurrentDaysDelinquent), 
+                                        digits=0))
+NothomeownerMeanDeliq <- as.numeric(format(mean(subset(loan_sample, 
+                                                       IsBorrowerHomeowner=='False')$LoanCurrentDaysDelinquent), 
+                                           digits=0))
+
+ggplot(aes(x=IsBorrowerHomeowner, 
+           y=LoanCurrentDaysDelinquent), 
+       data=loan_sample) +
+  geom_point(position = position_jitter(height=0), 
+             aes(color=IncomeRange)) +
+  scale_y_continuous(breaks=seq(0,3000,100)) +
+  geom_hline(yintercept=NothomeownerMeanDeliq, 
+             linetype='dotted', 
+             color='red', 
+             size=2) +
+  geom_text(aes(x='False', 
+                y= NothomeownerMeanDeliq+5, 
+                label=paste('Mean DeliqDays of Not Homeowner =', 
+                            NothomeownerMeanDeliq,sep=" "))) +
+  geom_hline(yintercept = homeownerMeanDeliq, 
+             linetype='dashed', 
+             color='red', 
+             size=1) +
+  geom_text(aes(x='True',
+                y= homeownerMeanDeliq+5, 
+                label=paste('Mean DeliqDays of Homeowner =', 
+                            homeownerMeanDeliq, 
+                            sep=" "))) +
+  coord_cartesian(ylim = c(0,200)) +
+  scale_colour_brewer(palette = 'RdBu')
+```
+
+The plot below shows Debt to Income Ratio against that of percentage of delinquent amount of different income ranges.
+
+One thing that seems to stand out massively is that borrowers in the $1-24,999 seems to be the most vulnerable group bar the other 3 groups that we have minimal data in.  Their debt to income ratio seems to be highly correlated to their percentage of delinquent amount.  This issue is much less pronounced in the higher income group.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+ggplot(aes(x=AmountDelinquent/LoanOriginalAmount, 
+           y=DebtToIncomeRatio, 
+           color=IncomeRange), 
+       data = subset(loan_sample, 
+                     (loan_sample$AmountDelinquent/ 
+                        loan_sample$LoanOriginalAmount)>0)) + 
+  geom_point(alpha=1/5) +
+  scale_y_continuous(breaks=seq(0,2,0.5)) +
+  scale_x_continuous(breaks=seq(0,2,0.5)) +
+  coord_cartesian(ylim=c(0,2), 
+                  xlim = c(0,2)) +
+  facet_wrap(~IncomeRange)+
+  guides(color=FALSE)
+
+```
+
+# Final Plots and Summary
+
+The following 3 plots were chosen as the final plots as they explore and answer 3 interesting questions to me
+
+## Plot 1
+
+### Question
+Is the wisdom of the crowd better than the ex-ante rate that the lender associate with the borrower (measured by BorrowerAPR)?
+
+### Analysis, thoughts and answer
+To make the behaviour of the data clearer, we will include a new variable where we plot the smoothed lines of max investors for each level of Borrower APR and splitting the scatter plot above into 4 quadrants gives us different intuition to how well or badly the 2 measures perform as seen by the intensity of red in each quadrant
+
+1) Top left quadrant (being intense red) - Wisdom of crowd fails and lending company fails. Both the crowd and the lending company failed to identify delinquent borrowers
+
+2) Bottom left quadrant (being intense red) - Wisdom of crowd succeeds where lending company fails. The crowd successfully "dodged the delinquency/principal loss bullet" unlike the company
+
+3) Top right quadrant (being intense red) - Wisdom of crowd fails while lending company success.  The lending company outperforms the masses.
+
+4) Bottom right quandrant (being intense red) - Wisdom of crowd succeeds and lending company succeeds. Both the crowd successfully "dodged the delinquency/principal loss bullet" 
+
+When it comes to NetPrincipal loss, it seems that lending company in general are seem to be less successful than the investors. The concentration of red seems to be concentrated in the left half of the graph where it seems that the lending company has wrongly evaluated the individuals by giving them a low rate but in the end suffered significant lossses.  Investors are not much better but at least the scatter seems more uniform (i.e. random chance)
+
+However when it comes to delinquencies, the wisdom of the crowd seems to be significantly outperform.  The intensity of the red is concentrated in the lower 2 quadrants of the graph and it seems randomly scattered across the BorrowerAPR.  Seems to suggest even if lenders randomly assign a lending rate, the delinquency will not look too different (which is pretty damning).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+loan_sample<-loan_sample %>% 
+  group_by(BorrowerAPR) %>% 
+  mutate(maxinvestorsbyAPR = max(Investors))
+
+p1<-ggplot(aes(x=BorrowerAPR, 
+               y=Investors, 
+               color=LP_NetPrincipalLoss), 
+           data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/3) +
+  scale_colour_gradient(limits=c(0,25000),
+                        low="white",
+                        high="red", 
+                        name = 'Net Principal Loss in USD',
+                        label = comma) + 
+  scale_y_log10(labels = comma) +
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm",
+              se=FALSE) +
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm", 
+              formula = y ~ splines::bs(x,4), 
+              color='black', 
+              se=FALSE) +
+  geom_label(aes(x=0.05, 
+                 y=500, 
+                 label='Linear'), 
+             color='blue')+
+  geom_label(aes(x=0.35, 
+                 y=400, 
+                 label='Polynomial 4 degrees'), 
+             color='black') 
+
+p2<-ggplot(aes(x=BorrowerAPR, 
+               y=Investors, 
+               color=AmountDelinquent), 
+           data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/3) +
+  scale_colour_gradient(limits=c(0,2500), 
+                        low="white",
+                        high="red" ,
+                        name = 'Delinquent Amount in USD',
+                        label = comma) +
+  scale_y_log10(labels = comma) + 
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm", 
+              se=FALSE) +
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm", 
+              formula = y ~ splines::bs(x,4), 
+              color='black',
+              se=FALSE) +
+  geom_label(aes(x=0.05, 
+                 y=500, 
+                 label='Linear'), 
+             color='blue') +
+  geom_label(aes(x=0.35, 
+                 y=400, 
+                 label='Polynomial 4 degrees'), 
+             color='black') 
+
+grid.arrange(p1, p2, ncol=1)
+```
+
+## Plot 2
+
+### Question
+Given the change in the lending standards post 2008, is there a significant improvement in the identification of the high risk borrowers
+
+### Analysis, thoughts and answer
+Using Borrower's APR as a proxy of how lender's view a borrower (ex ante) and principal loss as a measure of realisation (ex post), we plot the graph of Pre-2008 and Post-2008.  Straightaway, there is a significant difference in the graph. 
+
+1) Lenders are a lot more cautious post-2008 with the 99th percentile principal losses being 1.83 times higher in pre-2008 than post-2008 (as seen by the horizontal black line) 
+
+2) Principal losses due to "high risk borrowers" also seem to be "capped" post-2008 at about 15,000. Perhaps this is the result of stricter borrowing standards.
+
+3) The mean Lender yield has marginally increased by 5% (to about 25%) post-2008 but remains roughly the same. 
+
+4) Lenders are still surprisingly bad at assessing "low risk borrowers" as we can see from the top left quandrant (lenders view borrowers in the top left quandrant as less risky than the average borrower but suffered a loss >99% percentile of net principal loss) where the percentages have increased post-2008.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+
+lowrisk_highloss_pre<-with(loan_sample_pre, (BorrowerAPR<mean(BorrowerAPR) & LP_NetPrincipalLoss>quantile(LP_NetPrincipalLoss,probs =0.99)))
+
+pre_gap <- count(subset(loan_sample_pre, lowrisk_highloss_pre)) / 
+  count(loan_sample_pre) * 100
+
+lowrisk_highloss_post<-with(loan_sample_post, (BorrowerAPR<mean(BorrowerAPR) & LP_NetPrincipalLoss>quantile(LP_NetPrincipalLoss,probs =0.99)))
+
+post_gap <- count(subset(loan_sample_post, lowrisk_highloss_post)) / 
+  count(loan_sample_post) * 100
+
+p1<-ggplot(aes(x=BorrowerAPR, 
+               y = LP_NetPrincipalLoss), 
+           data=loan_sample_pre)+
+  geom_point(alpha=1/10, color='red') +
+  ggtitle("Pre 2008") + 
+  geom_line(aes(x=mean(BorrowerAPR), 
+                y=LP_NetPrincipalLoss), 
+            color='black') +
+  geom_line(aes(x=BorrowerAPR, 
+                y=quantile(LP_NetPrincipalLoss,probs =0.99)), 
+            color='black') +
+  geom_text(aes(0.12, 22000, 
+                label=paste(paste("Percentage ", 
+                                  "of sample =", 
+                                  format(pre_gap,digits=3), 
+                                  sep='\n'), '%'))) +
+  scale_y_continuous(breaks = seq(0,25000,5000),
+                     limits = c(0,25000),
+                     labels = comma, 
+                     name = 'Net Principal Loss in USD')
+
+
+p2<-ggplot(aes(x=BorrowerAPR, 
+               y = LP_NetPrincipalLoss), 
+           data=loan_sample_post)+
+  geom_point(alpha=1/10, 
+             color='blue')+
+  ggtitle('Post 2008') + 
+  geom_line(aes(x=mean(BorrowerAPR), 
+                y=LP_NetPrincipalLoss), 
+            color='black') +
+  geom_line(aes(x=BorrowerAPR, 
+                y=quantile(LP_NetPrincipalLoss,probs =0.99)), 
+            color='black')+
+  geom_text(aes(0.15,15000, 
+                label=paste(paste("Percentage ", 
+                                  "of sample =", 
+                                  format(post_gap,digits=3), 
+                                  sep='\n'),'%'))) +
+  scale_y_continuous(breaks = seq(0,25000,5000),
+                     limits = c(0,25000),
+                     labels = comma, 
+                     name = 'Net Principal Loss in USD') 
+
+grid.arrange(p1, p2, nrow=1)
+
+quantile(loan_sample_pre$LP_NetPrincipalLoss, 
+         probs =0.99) / 
+  quantile(loan_sample_post$LP_NetPrincipalLoss, probs =0.99)
+mean(loan_sample_pre$BorrowerAPR)-mean(loan_sample_post$BorrowerAPR)
+```
+
+## Plot 3
+
+### Question
+Why are the number of borrowers from the higher income group increasing but the amount of credit available from the lower income group increasing?
+
+### Analysis, thoughts and answer
+A cynical (or some say worldly) claim might be that lenders find that it is just not profitable lending to high income individuals and they are a drag on margins and hence reduced the amount of credit available to them  whilst corresponding deploying the freed up resources to lower income individuals
+
+This claim seems to hold more water 
+
+The top two boxplots shows observable yield differences the lender received from individuals from different income group especially post 2008.  
+
+Given that the post-2008 sample size is about twice that of the pre-2008 sample size, I reduced the alpha by half for pre-2008 samples to make the color intensity "equivalent".  With that in mind, the bottom two scatter plots of loan delinquency seems show something interesting.  
+
+First and foremost, lenders have been a lot better at managing delinquency (the number of deliquent days have decreased by almost 5 times) but more importantly, the relative intensity of the color of the 2 groups ($25,000-49,999 and $50,000-74,999) against the rest have increased visibly post-2008 .  This together with a higher LenderYield seems to point to the fact that these groups have become much more profitable for the lenders (assuming no defaults) 
+
+This seems to suggest, higher income individuals are applying more frequently as they are "less likely" to be granted sufficient credit balances for their purposes and the resources have been diverted to the more profitable lower income borrowers coupled with a a significant improvement of deliquency management by the lenders.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig_width = 12}
+pre<- ggplot(aes(x=IncomeRange,y=LenderYield), 
+             data = subset(loan_sample_pre1, 
+                           !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/25)+
+  scale_y_continuous(labels = comma, 
+                     breaks = seq(0,0.5,0.05)) +
+  ggtitle('Pre-2008 \n LenderYield') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+post<- ggplot(aes(x=IncomeRange,
+                  y=LenderYield), 
+              data = subset(loan_sample_post1, 
+                            !loan_sample_post1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/50) +
+  scale_y_continuous(labels = comma, 
+                     breaks = seq(0,0.5,0.05),
+                     name = 'Lender Yield in %') +
+  ggtitle('Post-2008 \n LenderYield') +
+  theme(axis.text.x=element_blank()) + 
+  scale_fill_brewer()
+
+
+pre1<- ggplot(aes(x=IncomeRange, 
+                  y=LoanCurrentDaysDelinquent), 
+              data = subset(loan_sample_pre1, 
+                            !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                              !loan_sample_pre1$IncomeRange=='Not employed' &
+                              loan_sample_pre1$LoanCurrentDaysDelinquent!=0)) +
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/5) +
+  scale_y_continuous(breaks=seq(0,2500,500),
+                     labels = comma,
+                     name = 'Current Loan Delinquent Days') +
+  coord_cartesian(ylim = c(0,2500)) +
+  ggtitle('Pre-2008 \n LoanCurrentDaysDelinquent') +
+  theme(axis.text.x=element_blank()) + 
+  scale_color_brewer()
+
+
+post1<- ggplot(aes(x=IncomeRange, 
+                   y=LoanCurrentDaysDelinquent), 
+               data = subset(loan_sample_post1, 
+                             (loan_sample_post1$IncomeRange!='Not employed' & 
+                                loan_sample_post1$LoanCurrentDaysDelinquent!= 
+                                0))) +
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/3) +
+  scale_y_continuous(breaks=seq(0,2500,500), 
+                     labels = comma,
+                     name = 'Current Loan Delinquent Days') +
+  coord_cartesian(ylim = c(0,2500)) +
+  ggtitle('Post-2008 \n LoanCurrentDaysDelinquent') +
+  theme(axis.text.x=element_blank()) + 
+  scale_color_brewer()
+
+
+by(loan_sample_pre1$LenderYield, 
+   loan_sample_pre1$IncomeRange, 
+   summary)
+by(loan_sample_post1$LenderYield, 
+   loan_sample_post1$IncomeRange, 
+   summary)
+grid.arrange(pre, post, pre1, post1, nrow=2)
+```
+
+
+# Reflections
+
+There are various things in the data set that I found extremely interesting and with more data will certainly be useful.
+
+For example, I am quite curious why richer people are so much more willing to tap into credit lines post 2008?  Is there a reduction in social stigma? Is it because pay is not keeping in pace with inflation? Or is it because they have received "promotional deals" such as it becomes cheaper for them to tap into credit lines for investment purposes?  These are various things that can be cross referenced against a different snapshot or an entirely different data set for us to gain more insight into the behaviour of the consumer.  In this way, we can actually tailor a more optimal product to each income group and also, prevent unsuitable and potentially litigatious product from being released to segments of the population that are ill-suited for it
+
+I find the structural changes in the data extremely interesting and there are various analysis that can be done on the sample such as examining the "cap" on BorrowerAPR we seem to be witnessing in the last plot.  Has the "cap" encouraged or "discouraged" lending/ borrowings?  How does it have implications on deliquencies?  This helps in policy analysis.  Is the Lender yield cap of 30% achieving the spirit of what it set out to achieve?  Is it leading to exploitation or any sort of unintended consequences?  
+
+The main difficulty encountered comes from incomplete dataset.  Sometimes, it is not immediately clear if the data has a structural feature that is resulting in data missing or were they missing because of bad data collection.  This makes it extremely tricky to look at subsets of data that excludes missing observations as we might be missing a trend or in the worst case, introducing structural flaws into the data.

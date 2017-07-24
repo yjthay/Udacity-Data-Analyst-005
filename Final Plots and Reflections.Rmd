@@ -1,0 +1,246 @@
+---
+title: "Final Plots and Reflections"
+author: "YJ Thay"
+date: "10 October 2016"
+output: html_document
+---
+
+# Final Plots and Summary
+
+The following 3 plots were chosen as the final plots as they explore and answer 3 interesting questions to me
+
+## Plot 1
+
+### Question
+Is the wisdom of the crowd better than the ex-ante rate that the lender associate with the borrower (measured by BorrowerAPR)?
+
+### Analysis, thoughts and answer
+To make the behaviour of the data clearer, we will include a new variable where we plot the smoothed lines of max investors for each level of Borrower APR and splitting the scatter plot above into 4 quadrants gives us different intuition to how well or badly the 2 measures perform as seen by the intensity of red in each quadrant
+
+1) Top left quadrant (being intense red) - Wisdom of crowd fails and lending company fails. Both the crowd and the lending company failed to identify delinquent borrowers
+
+2) Bottom left quadrant (being intense red) - Wisdom of crowd succeeds where lending company fails. The crowd successfully "dodged the delinquency/principal loss bullet" unlike the company
+
+3) Top right quadrant (being intense red) - Wisdom of crowd fails while lending company success.  The lending company outperforms the masses.
+
+4) Bottom right quandrant (being intense red) - Wisdom of crowd succeeds and lending company succeeds. Both the crowd successfully "dodged the delinquency/principal loss bullet" 
+
+When it comes to NetPrincipal loss, it seems that lending company in general are seem to be less successful than the investors. The concentration of red seems to be concentrated in the left half of the graph where it seems that the lending company has wrongly evaluated the individuals by giving them a low rate but in the end suffered significant lossses.  Investors are not much better but at least the scatter seems more uniform (i.e. random chance)
+
+However when it comes to delinquencies, the wisdom of the crowd seems to be significantly outperform.  The intensity of the red is concentrated in the lower 2 quadrants of the graph and it seems randomly scattered across the BorrowerAPR.  Seems to suggest even if lenders randomly assign a lending rate, the delinquency will not look too different (which is pretty damning).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+loan_sample<-loan_sample %>% 
+  group_by(BorrowerAPR) %>% 
+  mutate(maxinvestorsbyAPR = max(Investors))
+
+p1<-ggplot(aes(x=BorrowerAPR, 
+               y=Investors, 
+               color=LP_NetPrincipalLoss), 
+           data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/3) +
+  scale_colour_gradient(limits=c(0,25000),
+                        low="white",
+                        high="red") + 
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm") +
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm", 
+              formula = y ~ splines::bs(x,4), 
+              color='black') +
+  geom_label(aes(x=0.05, 
+                 y=500, 
+                 label='Linear'), 
+             color='blue')+
+  geom_label(aes(x=0.35, 
+                 y=400, 
+                 label='Polynomial 4 degrees'), 
+             color='black')
+
+p2<-ggplot(aes(x=BorrowerAPR, 
+               y=Investors, 
+               color=AmountDelinquent), 
+           data=loan_sample) +
+  geom_point(position=position_jitter(), 
+             alpha=1/3) +
+  scale_colour_gradient(limits=c(0,2500), 
+                        low="white",
+                        high="red") + 
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm") +
+  geom_smooth(aes(y=maxinvestorsbyAPR), 
+              method = "lm", 
+              formula = y ~ splines::bs(x,4), 
+              color='black') +
+  geom_label(aes(x=0.05, 
+                 y=500, 
+                 label='Linear'), 
+             color='blue') +
+  geom_label(aes(x=0.35, 
+                 y=400, 
+                 label='Polynomial 4 degrees'), 
+             color='black')
+
+grid.arrange(p1, p2, ncol=1)
+```
+
+## Plot 2
+
+### Question
+Given the change in the lending standards post 2008, is there a significant improvement in the identification of the high risk borrowers
+
+### Analysis, thoughts and answer
+Using Borrower's APR as a proxy of how lender's view a borrower (ex ante) and principal loss as a measure of realisation (ex post), we plot the graph of Pre-2008 and Post-2008.  Straightaway, there is a significant difference in the graph. 
+
+1) Lenders are a lot more cautious post-2008 with the 99th percentile principal losses being 1.83 times higher in pre-2008 than post-2008 (as seen by the horizontal black line) 
+
+2) Principal losses due to "high risk borrowers" also seem to be "capped" post-2008 at about 15,000. Perhaps this is the result of stricter borrowing standards.
+
+3) The mean Lender yield has marginally increased by 5% (to about 25%) post-2008 but remains roughly the same. 
+
+4) Lenders are still surprisingly bad at assessing "low risk borrowers" as we can see from the top left quandrant (lenders view borrowers in the top left quandrant as less risky than the average borrower but suffered a loss >99% percentile of net principal loss) where the percentages have increased post-2008.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+lowrisk_highloss_pre<-with(loan_sample_pre, (BorrowerAPR<mean(BorrowerAPR) & LP_NetPrincipalLoss>quantile(LP_NetPrincipalLoss,probs =0.99)))
+
+pre_gap <- count(subset(loan_sample_pre, lowrisk_highloss_pre))/count(loan_sample_pre) * 100
+
+lowrisk_highloss_post<-with(loan_sample_post, (BorrowerAPR<mean(BorrowerAPR) & LP_NetPrincipalLoss>quantile(LP_NetPrincipalLoss,probs =0.99)))
+
+post_gap<-count(subset(loan_sample_post, lowrisk_highloss_post))/count(loan_sample_post) * 100
+
+p1<-ggplot(aes(x=BorrowerAPR, 
+               y = LP_NetPrincipalLoss), 
+           data=loan_sample_pre)+
+  geom_point(alpha=1/10, color='red') +
+  ggtitle("Pre 2008") + 
+  geom_line(aes(x=mean(BorrowerAPR), 
+                y=LP_NetPrincipalLoss), 
+            color='black') +
+  geom_line(aes(x=BorrowerAPR, 
+                y=quantile(LP_NetPrincipalLoss,probs =0.99)), 
+            color='black') +
+  geom_text(aes(0.1, 22000, 
+                label=paste(paste("Percentage =", 
+                                  format(pre_gap,digits=3), 
+                                  sep='\n'), '%')))
+
+
+p2<-ggplot(aes(x=BorrowerAPR, 
+               y = LP_NetPrincipalLoss), 
+           data=loan_sample_post)+
+  geom_point(alpha=1/10, 
+             color='blue')+
+  ggtitle('Post 2008') + 
+  geom_line(aes(x=mean(BorrowerAPR), 
+                y=LP_NetPrincipalLoss), 
+            color='black') +
+  geom_line(aes(x=BorrowerAPR, 
+                y=quantile(LP_NetPrincipalLoss,probs =0.99)), 
+            color='black')+
+  geom_text(aes(0.15,15000, 
+                label=paste(paste("Percentage =", 
+                                  format(post_gap,digits=3), 
+                                  sep='\n'),'%')))
+
+grid.arrange(p1, p2, nrow=1)
+
+quantile(loan_sample_pre$LP_NetPrincipalLoss, 
+         probs =0.99) / 
+  quantile(loan_sample_post$LP_NetPrincipalLoss, probs =0.99)
+mean(loan_sample_pre$BorrowerAPR)-mean(loan_sample_post$BorrowerAPR)
+```
+
+## Plot 3
+
+### Question
+Why are the number of borrowers from the higher income group increasing but the amount of credit available from the lower income group increasing?
+
+### Analysis, thoughts and answer
+A cynical (or some say worldly) claim might be that lenders find that it is just not profitable lending to high income individuals and they are a drag on margins and hence reduced the amount of credit available to them  whilst corresponding deploying the freed up resources to lower income individuals
+
+This claim seems to hold more water 
+
+The top two boxplots shows observable yield differences the lender received from individuals from different income group especially post 2008.  
+
+Given that the post-2008 sample size is about twice that of the pre-2008 sample size, I reduced the alpha by half for pre-2008 samples to make the color intensity "equivalent".  With that in mind, the bottom two scatter plots of loan delinquency seems show something interesting.  
+
+First and foremost, lenders have been a lot better at managing delinquency (the number of deliquent days have decreased by almost 5 times) but more importantly, the relative intensity of the color of the 2 groups ($25,000-49,999 and $50,000-74,999) against the rest have increased visibly post-2008 .  This together with a higher LenderYield seems to point to the fact that these groups have become much more profitable for the lenders (assuming no defaults) 
+
+This seems to suggest, higher income individuals are applying more frequently as they are "less likely" to be granted sufficient credit balances for their purposes and the resources have been diverted to the more profitable lower income borrowers coupled with a a significant improvement of deliquency management by the lenders.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+pre<- ggplot(aes(x=IncomeRange,y=LenderYield), 
+             data = subset(loan_sample_pre1, 
+                           !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                             !loan_sample_pre1$IncomeRange=='Not employed'))+
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/25)+
+  scale_y_continuous(labels = comma, 
+                     breaks = seq(0,0.5,0.05)) +
+  ggtitle('Pre-2008 \n LenderYield') +
+  theme(axis.text.x=element_blank())
+
+post<- ggplot(aes(x=IncomeRange,
+                  y=LenderYield), 
+              data = subset(loan_sample_post1, 
+                            !loan_sample_post1$IncomeRange=='Not employed')) +
+  geom_boxplot(aes(fill = IncomeRange)) + 
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/50) +
+  scale_y_continuous(labels = comma, 
+                     breaks = seq(0,0.5,0.05)) +
+  ggtitle('Post-2008 \n LenderYield') +
+  theme(axis.text.x=element_blank())
+
+pre1<- ggplot(aes(x=IncomeRange, 
+                  y=LoanCurrentDaysDelinquent), 
+              data = subset(loan_sample_pre1, 
+                            !loan_sample_pre1$IncomeRange=='Not displayed' & 
+                              !loan_sample_pre1$IncomeRange=='Not employed' &
+                              loan_sample_pre1$LoanCurrentDaysDelinquent!=0)) +
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/5) +
+  scale_y_continuous(breaks=seq(0,2500,500)) +
+  coord_cartesian(ylim = c(0,2500)) +
+  ggtitle('Pre-2008 LoanCurrentDaysDelinquent') +
+  theme(axis.text.x=element_blank())
+
+post1<- ggplot(aes(x=IncomeRange, 
+                   y=LoanCurrentDaysDelinquent), 
+               data = subset(loan_sample_post1, 
+                             (loan_sample_post1$IncomeRange!='Not employed' & 
+                                loan_sample_post1$LoanCurrentDaysDelinquent!=0))) +
+  geom_point(aes(color = IncomeRange), 
+             position = position_jitter(), 
+             alpha=1/3) +
+  scale_y_continuous(breaks=seq(0,2500,500)) +
+  coord_cartesian(ylim = c(0,2500)) +
+  ggtitle('Post-2008 LoanCurrentDaysDelinquent') +
+  theme(axis.text.x=element_blank())
+
+by(loan_sample_pre1$LenderYield, 
+   loan_sample_pre1$IncomeRange, 
+   summary)
+by(loan_sample_post1$LenderYield, 
+   loan_sample_post1$IncomeRange, 
+   summary)
+grid.arrange(pre, post, pre1, post1, nrow=2)
+```
+
+
+# Reflections
+
+There are various things in the data set that I found extremely interesting and with more data will certainly be useful.
+
+For example, I am quite curious why richer people are so much more willing to tap into credit lines post 2008?  Is there a reduction in social stigma? Is it because pay is not keeping in pace with inflation? Or is it because they have received "promotional deals" such as it becomes cheaper for them to tap into credit lines for investment purposes?  These are various things that can be cross referenced against a different snapshot or an entirely different data set for us to gain more insight into the behaviour of the consumer.  In this way, we can actually tailor a more optimal product to each income group and also, prevent unsuitable and potentially litigatious product from being released to segments of the population that are ill-suited for it
+
+I find the structural changes in the data extremely interesting and there are various analysis that can be done on the sample such as examining the "cap" on BorrowerAPR we seem to be witnessing in the last plot.  Has the "cap" encouraged or "discouraged" lending/ borrowings?  How does it have implications on deliquencies?  This helps in policy analysis.  Is the Lender yield cap of 30% achieving the spirit of what it set out to achieve?  Is it leading to exploitation or any sort of unintended consequences?  
+
+The main difficulty encountered comes from incomplete dataset.  Sometimes, it is not immediately clear if the data has a structural feature that is resulting in data missing or were they missing because of bad data collection.  This makes it extremely tricky to look at subsets of data that excludes missing observations as we might be missing a trend or in the worst case, introducing structural flaws into the data.
